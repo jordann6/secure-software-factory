@@ -1,0 +1,85 @@
+global:
+  enabled: true
+
+injector:
+  # Using Vault Secrets Operator instead of the agent injector
+  enabled: false
+
+csi:
+  enabled: false
+
+server:
+  image:
+    repository: hashicorp/vault
+    tag: "1.15.2"
+
+  serviceAccount:
+    create: true
+    name: vault
+    annotations:
+      # Populated from: terraform output vault_irsa_role_arn
+      eks.amazonaws.com/role-arn: "REPLACE_WITH_VAULT_IRSA_ROLE_ARN"
+
+  extraEnvironmentVars:
+    AWS_REGION: us-east-1
+    # Populated from: terraform output vault_kms_key_id
+    VAULT_KMS_KEY_ID: "REPLACE_WITH_KMS_KEY_ID"
+
+  ha:
+    enabled: true
+    replicas: 3
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = true
+
+        listener "tcp" {
+          # Enable TLS in production using cert-manager-issued certificates
+          tls_disable     = 1
+          address         = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+
+        storage "raft" {
+          path = "/vault/data"
+
+          retry_join {
+            leader_api_addr = "http://vault-0.vault-internal:8200"
+          }
+          retry_join {
+            leader_api_addr = "http://vault-1.vault-internal:8200"
+          }
+          retry_join {
+            leader_api_addr = "http://vault-2.vault-internal:8200"
+          }
+        }
+
+        seal "awskms" {
+          region     = env("AWS_REGION")
+          kms_key_id = env("VAULT_KMS_KEY_ID")
+        }
+
+        service_registration "kubernetes" {}
+
+  resources:
+    requests:
+      memory: 256Mi
+      cpu: 250m
+    limits:
+      memory: 512Mi
+      cpu: 500m
+
+  dataStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: gp2
+
+  auditStorage:
+    enabled: true
+    size: 10Gi
+    storageClass: gp2
+
+ui:
+  enabled: true
+  serviceType: ClusterIP

@@ -1,0 +1,11 @@
+aws_region         = "us-east-1"
+environment        = "dev"
+cluster_name       = "secure-factory-dev"
+kubernetes_version = "1.29"
+node_instance_type = "t3.medium"
+node_min           = 2
+node_max           = 5
+node_desired       = 2
+ecr_repositories   = ["demo-app"]
+github_org         = "your-github-org"
+github_repo        = "secure-software-factory"

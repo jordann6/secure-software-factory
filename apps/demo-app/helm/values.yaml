@@ -1,0 +1,26 @@
+replicaCount: 2
+
+image:
+  # Updated automatically by the CI pipeline
+  repository: REPLACE_WITH_ECR_REGISTRY/demo-app
+  tag: "latest"
+  digest: ""
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+vault:
+  authMount: kubernetes
+  role: demo-app
+  secretPath: secret/data/demo-app/config
+  secretDestination: demo-app-config

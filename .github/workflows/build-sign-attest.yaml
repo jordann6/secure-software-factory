@@ -1,0 +1,95 @@
+name: Build, Sign, and Attest
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/demo-app/**"
+
+permissions:
+  id-token: write
+  contents: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: demo-app
+
+jobs:
+  build-sign-attest:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/demo-app
+          push: true
+          tags: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign image (keyless, OIDC-pinned to this workflow)
+        run: |
+          cosign sign --yes \
+            "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest SBOM
+        run: |
+          cosign attest --yes \
+            --predicate sbom.spdx.json \
+            --type spdxjson \
+            "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
+
+      - name: Scan with Grype
+        id: scan
+        uses: anchore/scan-action@v3
+        with:
+          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+
+      - name: Attest vulnerability scan results
+        run: |
+          cosign attest --yes \
+            --predicate ${{ steps.scan.outputs.json }} \
+            --type vuln \
+            "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
+
+      - name: Update image digest in Helm values
+        run: |
+          IMAGE_DIGEST="${{ steps.build.outputs.digest }}"
+          sed -i "s|digest:.*|digest: \"${IMAGE_DIGEST}\"|g" apps/demo-app/helm/values.yaml
+          sed -i "s|tag:.*|tag: \"${{ github.sha }}\"|g" apps/demo-app/helm/values.yaml
+
+      - name: Commit updated Helm values
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore(deploy): update demo-app image to ${{ github.sha }}"
+          file_pattern: apps/demo-app/helm/values.yaml

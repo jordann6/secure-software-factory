@@ -1,0 +1,55 @@
+name: Policy Check
+
+on:
+  pull_request:
+    paths:
+      - "apps/demo-app/Dockerfile"
+      - "apps/demo-app/helm/**"
+      - "platform/kyverno/**"
+      - "policy/**"
+
+jobs:
+  conftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Conftest
+        run: |
+          VERSION=v0.50.0
+          wget -q "https://github.com/open-policy-agent/conftest/releases/download/${VERSION}/conftest_0.50.0_Linux_x86_64.tar.gz"
+          tar xzf conftest_0.50.0_Linux_x86_64.tar.gz
+          sudo mv conftest /usr/local/bin/
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: v3.14.0
+
+      - name: Test Dockerfile policy
+        run: |
+          conftest test apps/demo-app/Dockerfile \
+            --parser dockerfile \
+            --policy policy/conftest/dockerfile.rego
+
+      - name: Render Helm chart and test policy
+        run: |
+          helm template demo-app apps/demo-app/helm > /tmp/rendered.yaml
+          conftest test /tmp/rendered.yaml \
+            --policy policy/conftest/helm.rego \
+            --all-namespaces
+
+  kyverno-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Kyverno CLI
+        run: |
+          curl -LO "https://github.com/kyverno/kyverno/releases/download/v1.12.0/kyverno-cli_v1.12.0_linux_x86_64.tar.gz"
+          tar xzf kyverno-cli_v1.12.0_linux_x86_64.tar.gz
+          sudo mv kyverno /usr/local/bin/
+
+      - name: Validate Kyverno policies
+        run: |
+          kyverno test platform/kyverno/

@@ -1,0 +1,36 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-scan-attestation
+  annotations:
+    policies.kyverno.io/title: Require Vulnerability Scan Attestation
+    policies.kyverno.io/description: >-
+      Every image deployed to the demo namespace must have a vulnerability scan
+      attestation signed by the GitHub Actions OIDC identity. The CI pipeline
+      fails the build on high-severity findings, so a valid attestation implies
+      the image passed the scan gate.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: check-scan-attestation
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+              namespaces:
+                - demo
+      verifyImages:
+        - imageReferences:
+            - "*"
+          attestations:
+            - predicateType: https://cosign.sigstore.dev/attestation/vuln/v1
+              attestors:
+                - count: 1
+                  entries:
+                    - keyless:
+                        subject: "https://github.com/jordann6/secure-software-factory/.github/workflows/build-sign-attest.yaml@refs/heads/main"
+                        issuer: "https://token.actions.githubusercontent.com"
+                        rekor:
+                          url: https://rekor.sigstore.dev
