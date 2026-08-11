@@ -17,6 +17,9 @@ env:
 jobs:
   build-sign-attest:
     runs-on: ubuntu-latest
+    # Skips until the infrastructure exists and AWS_ROLE_ARN is set as a repo
+    # variable, so a fresh clone does not fail CI before `terraform apply`.
+    if: vars.AWS_ROLE_ARN != ''
 
     steps:
       - uses: actions/checkout@v4
