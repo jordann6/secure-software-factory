@@ -37,7 +37,26 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
+      - name: Build image (local, not pushed yet)
+        id: build-local
+        uses: docker/build-push-action@v5
+        with:
+          context: apps/demo-app
+          load: true
+          tags: local-scan:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Scan with Grype (before push)
+        id: scan
+        uses: anchore/scan-action@v3
+        with:
+          image: local-scan:${{ github.sha }}
+          fail-build: true
+          severity-cutoff: high
+          output-format: json
+
+      - name: Build and push (scan passed)
         id: build
         uses: docker/build-push-action@v5
         with:
@@ -68,15 +87,6 @@ jobs:
             --predicate sbom.spdx.json \
             --type spdxjson \
             "${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}"
-
-      - name: Scan with Grype
-        id: scan
-        uses: anchore/scan-action@v3
-        with:
-          image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}@${{ steps.build.outputs.digest }}
-          fail-build: true
-          severity-cutoff: high
-          output-format: json
 
       - name: Attest vulnerability scan results
         run: |
